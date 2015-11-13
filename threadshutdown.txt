@@ -1,0 +1,111 @@
+Shutdown Mechanism for Threads:
+
+
+On LINUX/UNIX:
+
+Lock Mutex
+bool fSleepNeeded=true
+while (! shutdown)
+{
+    if (fSleepNeeded)
+    {
+        <Compute next sleep time>
+        fSleepNeeded = false
+    }
+    pthread_cond_timedwait
+    if timeout
+    {
+        fSleepNeeded = true
+        <do work>
+    }
+}
+Unlock Mutex
+
+To signal shutdown:
+  Lock mutex
+  Set shutdown flag
+  Signal Condition
+  Unlock mutex
+
+Basic Elements Needed:
+  Lock
+  Condition
+  Shutdown flag
+
+
+On Windows:
+
+while (! shutdown)
+{
+    <compute next sleep time>
+    waitforsingleobject
+    if timeout
+    {
+        <do work>
+    }
+}
+
+To signal shutdown:
+  Set shutdown flag
+  setevent
+
+Basic Elements Needed:
+  Shutdown flag
+  Handle (set for syncronization)
+
+
+
+Common construct for DataAquisitionThread for Windows and Linux (helper functions mixed into SCXThreadParam):
+
+BeginCondition()
+while (! shutdown)
+{
+    WaitForCondition()
+    if timeout
+    {
+	<do work>
+    }
+}
+EndCondition()
+
+
+
+This sort of thing seems like it would work for both Windows and Unix/Linux.
+
+SCXCondition would have boolean fSleepNeeded flag, would compute proper sleep time (sleep time would be
+passed into constructor), etc, much like SCXSleeper does today.
+
+SCXCondition class would contain:
+  Windows: Handle setup for synchronization
+  UNIX:    Mutex, condition
+
+BeginCondition() would be something like:
+  Windows: Empty body
+  Unix:    Lock handle
+
+EndCondition() would be something like:
+   Windows:  Empty body
+   Unix:     Unlock handle
+
+WaitForCondition:
+   If fSleepNeeded flag is set, recompute sleep time.
+
+   Windows:  WaitForSingleObject()
+   Unix:     Pthread_cond_timedwait
+
+   If timeout, set fSleepNeeded flag and return timeout to caller
+
+
+I think this would work fine for both platforms.  I propose mixing something similar to SCXSleeper() into
+a new class, SCXCondition, that would do the above stuff.
+
+The sleep code is a little ticky.  The idea here is this:
+
+We want code to run once/sleep interval.  If work takes .2 seconds, total interval is 1.0 seconds, then we
+want to sleep for 0.8 seconds.  The problem: On Windows, the sleep is relative.  If we get descheduled prior
+to the WaitForSingleObject, then sleep will be too long.  On UNIX, the sleep is absolute just to work around
+scheduling problems.  Can't do much about this on Windows, but it will eventually correct itself over time on
+Windows (more or less).
+
+Doing it this way leaves the predicate check (in this case, the shutdown) to the caller, which maximizes
+flexibility of the class for other potential uses.

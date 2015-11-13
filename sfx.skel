@@ -1,0 +1,129 @@
+#!/bin/sh
+#
+#
+# Use this script by concatenating it with some binary package.  This code is
+# currently setup with the assumption that the binary part of the bundle is a
+# gzip'ed tarball, but it can be modified to work with anything.
+#
+# The bundle is created by cat'ing the script in front of the binary, so for
+# the gzip'ed tar example, a command like the following will build the bundle:
+#
+#     tar -cfvz - <target-dir> | cat sfx.skel - > my.bundle
+#
+# The bundle can then be copied to a system, made executable (chmod +x) and
+# then run.  When run without any options it will make any pre-extraction
+# calls, extract the binary, and then make any post-extraction calls.
+#
+# This example script has some usefull helper options to split out the script
+# and/or binary in place, and to turn on shell debugging.
+#
+# The magic of this script is the regular expression used by sed to find the
+# transition between the script and the binary file.  In this example it is
+# the line that starts with WHITESPACE, followed by "#####>>-", followd by
+# any text, and ending with "-<<#####".  The regular expression is:
+#
+#     /^[[:space:]]*#####>>-.*-<<#####$/
+#
+# Note The use of the class [:space:], which may not be supported on some
+#      platforms.  If that is the case, it may be necessary to replace the class
+#      with a space and a tab character.  If this is the case, it is important
+#      that anyone editing the document is careful not to use an editor that
+#      replaces tabs with spaces.
+#
+# Note: The sequences "#####>>-" and "-<<#####" can be anything that is
+#       sufficiently unique that it won't appear in the script or binary
+#       at the begining/end of a line.
+#
+# Note: It is important that the delimiter line is followed by a single,
+#       empty line.  Otherwise the binary portion, wheather it is a tarball
+#       an install package, or an actual executable will basically be corupted
+#       with leading garbage characters.
+#
+
+
+SCRIPT="`readlink -e $0`"
+PATH=/usr/bin:/bin
+umask 022
+
+
+usage()
+{
+    echo "usage: $1 [OPTIONS]"
+    echo "Options:"
+    echo "  --extract-script FILE  extract the script to FILE."
+    echo "  --extract-binary FILE  extract the binary to FILE."
+    echo "  --debug                use shell debug mode."
+    echo "  -? | --help            shows this usage text."
+}
+
+
+while [ $# -ne 0 ]
+do
+    case "$1" in
+        --extract-script)
+            # hidden option, not part of usage
+            sed -n -e '1,/^[ 	]*#####>>-.*-<<#####$/p' "${SCRIPT}" > "$2"
+            local shouldexit=true
+            shift 2
+            ;;
+
+        --extract-binary)
+            # hidden option, not part of usage
+            sed -e '1,/^[ 	]*#####>>-.*-<<#####$/d' "${SCRIPT}" > "$2"
+            local shouldexit=true
+            shift 2
+            ;;
+
+        --debug)
+            echo "Starting shell debug mode."
+            set -x
+            shift 1
+            ;;
+
+        -? | --help)
+            usage `basename $0`
+            exit 0
+            ;;
+
+        *)
+            usage `basename $0` >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ -n "${shouldexit}" ]
+then
+    # when extracting script/tarball don't also install
+    exit 0
+fi
+
+#
+# Do stuff before extracting the binary here, for example test [ `id -u` -eq 0 ],
+# validate space, platform, uninstall a previous version, backup config data, etc...
+#
+
+#
+# Extract the binary here.  This example extracts the binary, decompresses it
+# and expands the tarball all in a single piped command.  It could just as easily
+# write a package to a temporary location and the invoke the platform specific
+# commands necessary to install the package.  (Although I would still tar/zip
+# the package for wire transfer.)
+#
+
+echo "Extracting..."
+sed -e '1,/^[ 	]*#####>>-.*-<<#####$/d' "${SCRIPT}" | tar xzf -
+STATUS=$?
+if [ ${STATUS} -ne 0 ]
+then
+    echo "Failed: could not extract the install bundle."
+    exit ${STATUS}
+fi
+
+#
+# Do stuff after extracting the binary here, such as actually installing the package.
+#
+
+exit 0
+
+#####>>- This must be the last line of this script, followed by a single empty line. -<<#####
